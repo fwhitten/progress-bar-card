@@ -92,14 +92,23 @@ const SCHEMA = [
   },
 ];
 
-// Laid out by this editor rather than ha-form's grid, whose auto-fit columns
-// collapse to one at the widths a card editor actually gets.
-const THRESHOLD_VALUE_SCHEMA = [
-  { name: "value", required: true, selector: { number: { mode: "box", step: "any" } } },
-];
-
-const THRESHOLD_COLOR_SCHEMA = [
-  { name: "color", selector: { ui_color: { default_color: "primary" } } },
+/**
+ * ha-form's grid sizes its columns with repeat(auto-fit, minmax(200px, 1fr)),
+ * which collapses to a single column when the form is not laid out at a
+ * definite width. Pinning the column count and dropping the minimum keeps the
+ * two fields side by side, and lets ha-form align them the way it does
+ * everywhere else in Home Assistant.
+ */
+const THRESHOLD_SCHEMA = [
+  {
+    name: "",
+    type: "grid",
+    column_min_width: "0px",
+    schema: [
+      { name: "value", required: true, selector: { number: { mode: "box", step: "any" } } },
+      { name: "color", selector: { ui_color: { default_color: "primary" } } },
+    ],
+  },
 ];
 
 @customElement(EDITOR_NAME)
@@ -148,15 +157,7 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
                   <ha-form
                     .hass=${this.hass}
                     .data=${threshold}
-                    .schema=${THRESHOLD_VALUE_SCHEMA}
-                    .computeLabel=${this._computeThresholdLabel}
-                    .index=${index}
-                    @value-changed=${this._thresholdChanged}
-                  ></ha-form>
-                  <ha-form
-                    .hass=${this.hass}
-                    .data=${threshold}
-                    .schema=${THRESHOLD_COLOR_SCHEMA}
+                    .schema=${THRESHOLD_SCHEMA}
                     .computeLabel=${this._computeThresholdLabel}
                     .index=${index}
                     @value-changed=${this._thresholdChanged}
@@ -270,9 +271,13 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
 
       .threshold {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto;
+        grid-template-columns: minmax(0, 1fr) auto;
         align-items: center;
         gap: 8px;
+      }
+
+      .threshold ha-form {
+        --form-grid-column-count: 2;
       }
     `;
   }

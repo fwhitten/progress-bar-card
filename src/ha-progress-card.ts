@@ -16,10 +16,13 @@ console.info(
 const BASE_ROW_HEIGHT = 56;
 const UNAVAILABLE_STATES = new Set(["unavailable", "unknown", "none", ""]);
 
-interface Line {
-  text: string;
-  distance: number;
+/** Whether a line overflows, and how far the loop travels before it repeats. */
+interface LineMetrics {
+  scroll: boolean;
+  dist: number;
 }
+
+const EMPTY_METRICS: LineMetrics = { scroll: false, dist: 0 };
 
 @customElement(CARD_NAME)
 export class HaProgressCard extends LitElement {
@@ -27,8 +30,8 @@ export class HaProgressCard extends LitElement {
 
   @state() private _config?: ProgressCardConfig;
   @state() private _scale = 1;
-  @state() private _nameDistance = 0;
-  @state() private _secondaryDistance = 0;
+  @state() private _name: LineMetrics = EMPTY_METRICS;
+  @state() private _secondary: LineMetrics = EMPTY_METRICS;
   @state() private _ink: "light" | "dark" = "light";
 
   private _resizeObserver?: ResizeObserver;
@@ -188,8 +191,7 @@ export class HaProgressCard extends LitElement {
     const name = this._config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id;
     const valueText = available ? this._formatValue(stateObj, numeric, percentage) : "";
 
-    const nameLine: Line = { text: name, distance: this._nameDistance };
-    const secondaryLine: Line = { text: this._secondaryText(), distance: this._secondaryDistance };
+    const secondaryText = this._secondaryText();
     const showValue = this._config.show_value !== false && available;
 
     const hostStyle = styleMap({
@@ -214,9 +216,11 @@ export class HaProgressCard extends LitElement {
         @keydown=${this._onKeyDown}
       >
         <div class="fill" style=${fillStyle}></div>
-        <div class="layer base">${this._renderContent(stateObj, nameLine, secondaryLine, valueText, showValue)}</div>
+        <div class="layer base">
+          ${this._renderContent(stateObj, name, secondaryText, valueText, showValue)}
+        </div>
         <div class="clip" style=${fillStyle}>
-          ${this._renderContent(stateObj, nameLine, secondaryLine, valueText, showValue)}
+          ${this._renderContent(stateObj, name, secondaryText, valueText, showValue)}
         </div>
       </ha-card>
     `;
@@ -229,8 +233,8 @@ export class HaProgressCard extends LitElement {
    */
   private _renderContent(
     stateObj: HassEntity,
-    name: Line,
-    secondary: Line,
+    name: string,
+    secondary: string,
     valueText: string,
     showValue: boolean,
   ): TemplateResult {
@@ -245,34 +249,41 @@ export class HaProgressCard extends LitElement {
               .stateObj=${stateObj}
             ></ha-state-icon>`}
         <div class="text">
-          <div
-            class=${classMap({ line: true, name: true, scroll: name.distance > 0 })}
-            style=${styleMap({
-              "--pb-dist": `${name.distance}px`,
-              "--pb-dur": `${this._duration(name.distance)}s`,
-            })}
-          >
-            <span>${name.text}</span>
-          </div>
-          ${secondary.text
-            ? html`<div
-                class=${classMap({ line: true, secondary: true, scroll: secondary.distance > 0 })}
-                style=${styleMap({
-                  "--pb-dist": `${secondary.distance}px`,
-                  "--pb-dur": `${this._duration(secondary.distance)}s`,
-                })}
-              >
-                <span>${secondary.text}</span>
-              </div>`
-            : nothing}
+          ${this._renderLine("name", name, this._name)}
+          ${secondary ? this._renderLine("secondary", secondary, this._secondary) : nothing}
         </div>
         ${showValue ? html`<div class="value">${valueText}</div>` : nothing}
       </div>
     `;
   }
 
+  /**
+   * An overflowing line is rendered twice, each copy followed by a separator,
+   * and translated by exactly one copy's width. The second copy lands where the
+   * first began, so the loop is seamless rather than bouncing back.
+   */
+  private _renderLine(kind: "name" | "secondary", text: string, metrics: LineMetrics): TemplateResult {
+    const animating = metrics.scroll && metrics.dist > 0;
+    const chunk = html`<span class="chunk"
+      ><span class="txt">${text}</span>${metrics.scroll
+        ? html`<span class="sep">|</span>`
+        : nothing}</span
+    >`;
+    return html`
+      <div
+        class=${classMap({ line: true, [kind]: true, scroll: metrics.scroll, animating })}
+        style=${styleMap({
+          "--pb-dist": `${metrics.dist}px`,
+          "--pb-dur": `${this._duration(metrics.dist)}s`,
+        })}
+      >
+        <span class="track">${chunk}${metrics.scroll ? chunk : nothing}</span>
+      </div>
+    `;
+  }
+
   private _duration(distance: number): number {
-    return Math.max(5, Math.round(distance / 22));
+    return Math.max(4, Math.round(distance / 30));
   }
 
   protected override firstUpdated(): void {
@@ -304,20 +315,29 @@ export class HaProgressCard extends LitElement {
       if (Math.abs(scale - this._scale) > 0.01) this._scale = scale;
     }
 
-    const nameDistance = this._overflowOf(".layer.base .line.name");
-    if (Math.abs(nameDistance - this._nameDistance) > 1) this._nameDistance = nameDistance;
+    const name = this._metricsOf(".layer.base .line.name");
+    if (this._changed(name, this._name)) this._name = name;
 
-    const secondaryDistance = this._overflowOf(".layer.base .line.secondary");
-    if (Math.abs(secondaryDistance - this._secondaryDistance) > 1) {
-      this._secondaryDistance = secondaryDistance;
-    }
+    const secondary = this._metricsOf(".layer.base .line.secondary");
+    if (this._changed(secondary, this._secondary)) this._secondary = secondary;
   }
 
-  private _overflowOf(selector: string): number {
+  private _changed(next: LineMetrics, current: LineMetrics): boolean {
+    return next.scroll !== current.scroll || Math.abs(next.dist - current.dist) > 1;
+  }
+
+  /**
+   * Overflow is measured from the text alone so the decision does not flip when
+   * the separator is added; the travel distance is one text-plus-separator copy.
+   */
+  private _metricsOf(selector: string): LineMetrics {
     const line = this.shadowRoot?.querySelector<HTMLElement>(selector);
-    const span = line?.firstElementChild as HTMLElement | null;
-    if (!line || !span) return 0;
-    return Math.max(0, Math.round(span.scrollWidth - line.clientWidth));
+    if (!line) return EMPTY_METRICS;
+    const txt = line.querySelector<HTMLElement>(".txt");
+    const chunk = line.querySelector<HTMLElement>(".chunk");
+    if (!txt || !chunk) return EMPTY_METRICS;
+    const scroll = txt.getBoundingClientRect().width > line.clientWidth + 1;
+    return { scroll, dist: scroll ? Math.round(chunk.getBoundingClientRect().width) : 0 };
   }
 
   private _hasAction(): boolean {
@@ -481,9 +501,38 @@ export class HaProgressCard extends LitElement {
         overflow: hidden;
       }
 
-      .line > span {
-        display: inline-block;
+      .track {
+        display: inline-flex;
         white-space: nowrap;
+      }
+
+      .chunk {
+        display: inline-flex;
+        flex: 0 0 auto;
+      }
+
+      .sep {
+        padding: 0 0.65em;
+        opacity: 0.45;
+      }
+
+      /* Softens the trim at both ends of a line that is scrolling. */
+      .line.scroll {
+        --pb-fade: calc(10px * var(--pb-scale));
+        -webkit-mask-image: linear-gradient(
+          to right,
+          transparent 0,
+          #000 var(--pb-fade),
+          #000 calc(100% - var(--pb-fade)),
+          transparent 100%
+        );
+        mask-image: linear-gradient(
+          to right,
+          transparent 0,
+          #000 var(--pb-fade),
+          #000 calc(100% - var(--pb-fade)),
+          transparent 100%
+        );
       }
 
       .name {
@@ -506,18 +555,16 @@ export class HaProgressCard extends LitElement {
         padding-inline-start: calc(8px * var(--pb-scale));
       }
 
-      .line.scroll > span {
-        animation: pb-marquee var(--pb-dur, 8s) linear infinite alternate;
+      .line.animating .track {
+        animation: pb-marquee var(--pb-dur, 8s) linear infinite;
         will-change: transform;
       }
 
       @keyframes pb-marquee {
-        0%,
-        12% {
+        from {
           transform: translateX(0);
         }
-        88%,
-        100% {
+        to {
           transform: translateX(calc(-1 * var(--pb-dist, 0px)));
         }
       }
@@ -531,7 +578,7 @@ export class HaProgressCard extends LitElement {
         .clip {
           transition: none;
         }
-        .line.scroll > span {
+        .line.animating .track {
           animation: none;
         }
       }
