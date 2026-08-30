@@ -27,10 +27,20 @@ Built for the **sections** dashboard layout: one grid row tall by default, resiz
 
 ### HACS (recommended)
 
+[![Open your Home Assistant instance and open a repository inside the Home Assistant Community Store.][my-hacs-badge]][my-hacs-url]
+
+Click the button above to open this repository directly in HACS, then choose **Download**. It
+works whether or not you have added the repository already.
+
+<details>
+<summary>Adding it by hand instead</summary>
+
 1. In Home Assistant go to **HACS → ⋮ → Custom repositories**.
 2. Add `https://github.com/fwhitten/progress-bar-card` with category **Dashboard**.
 3. Find **Progress Bar Card** in the list and install it.
 4. Reload your browser.
+
+</details>
 
 ### Manual
 
@@ -146,5 +156,7 @@ MIT
 
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://github.com/hacs/integration
+[my-hacs-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
+[my-hacs-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=fwhitten&repository=progress-bar-card&category=dashboard
 [release-badge]: https://img.shields.io/github/v/release/fwhitten/progress-bar-card
 [release-url]: https://github.com/fwhitten/progress-bar-card/releases/latest
