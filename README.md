@@ -157,6 +157,6 @@ MIT
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
 [hacs-url]: https://github.com/hacs/integration
 [my-hacs-badge]: https://my.home-assistant.io/badges/hacs_repository.svg
-[my-hacs-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=fwhitten&repository=progress-bar-card&category=dashboard
+[my-hacs-url]: https://my.home-assistant.io/redirect/hacs_repository/?owner=fwhitten&repository=progress-bar-card&category=plugin
 [release-badge]: https://img.shields.io/github/v/release/fwhitten/progress-bar-card
 [release-url]: https://github.com/fwhitten/progress-bar-card/releases/latest
