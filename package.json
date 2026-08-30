@@ -1,0 +1,19 @@
+{
+  "name": "ha-progress-card",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A configurable progress bar card for Home Assistant",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --noEmit && vite build",
+    "watch": "vite build --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "lit": "^3.2.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7"
+  }
+}

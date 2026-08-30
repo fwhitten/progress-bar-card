@@ -1,0 +1,6 @@
+{
+  "name": "Progress Bar Card",
+  "render_readme": true,
+  "filename": "ha-progress-card.js",
+  "homeassistant": "2024.11.0"
+}
