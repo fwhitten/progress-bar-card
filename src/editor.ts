@@ -92,15 +92,14 @@ const SCHEMA = [
   },
 ];
 
-const THRESHOLD_SCHEMA = [
-  {
-    name: "",
-    type: "grid",
-    schema: [
-      { name: "value", required: true, selector: { number: { mode: "box", step: "any" } } },
-      { name: "color", selector: { ui_color: { default_color: "primary" } } },
-    ],
-  },
+// Laid out by this editor rather than ha-form's grid, whose auto-fit columns
+// collapse to one at the widths a card editor actually gets.
+const THRESHOLD_VALUE_SCHEMA = [
+  { name: "value", required: true, selector: { number: { mode: "box", step: "any" } } },
+];
+
+const THRESHOLD_COLOR_SCHEMA = [
+  { name: "color", selector: { ui_color: { default_color: "primary" } } },
 ];
 
 @customElement(EDITOR_NAME)
@@ -149,7 +148,15 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
                   <ha-form
                     .hass=${this.hass}
                     .data=${threshold}
-                    .schema=${THRESHOLD_SCHEMA}
+                    .schema=${THRESHOLD_VALUE_SCHEMA}
+                    .computeLabel=${this._computeThresholdLabel}
+                    .index=${index}
+                    @value-changed=${this._thresholdChanged}
+                  ></ha-form>
+                  <ha-form
+                    .hass=${this.hass}
+                    .data=${threshold}
+                    .schema=${THRESHOLD_COLOR_SCHEMA}
                     .computeLabel=${this._computeThresholdLabel}
                     .index=${index}
                     @value-changed=${this._thresholdChanged}
@@ -191,7 +198,7 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
     ev.stopPropagation();
     const index = (ev.currentTarget as HTMLElement & { index: number }).index;
     const thresholds = [...this._thresholds];
-    thresholds[index] = ev.detail.value as ThresholdConfig;
+    thresholds[index] = { ...thresholds[index], ...(ev.detail.value as ThresholdConfig) };
     this._emit({ ...this._config!, thresholds });
   }
 
@@ -262,13 +269,10 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
       }
 
       .threshold {
-        display: flex;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto;
         align-items: center;
-        gap: 4px;
-      }
-
-      .threshold ha-form {
-        flex: 1 1 auto;
+        gap: 8px;
       }
     `;
   }

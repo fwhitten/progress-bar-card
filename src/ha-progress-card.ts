@@ -186,13 +186,11 @@ export class HaProgressCard extends LitElement {
 
     const barColor = colorForValue(numeric, this._config.thresholds, this._config.bar_color);
     const name = this._config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id;
-    const valueText = available
-      ? this._formatValue(stateObj, numeric, percentage)
-      : this.hass.formatEntityState?.(stateObj) ?? stateObj.state;
+    const valueText = available ? this._formatValue(stateObj, numeric, percentage) : "";
 
     const nameLine: Line = { text: name, distance: this._nameDistance };
     const secondaryLine: Line = { text: this._secondaryText(), distance: this._secondaryDistance };
-    const showValue = this._config.show_value !== false;
+    const showValue = this._config.show_value !== false && available;
 
     const hostStyle = styleMap({
       "--pb-radius": radius,
