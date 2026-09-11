@@ -17,7 +17,14 @@ export interface HomeAssistant {
   states: Record<string, HassEntity>;
   themes: { darkMode?: boolean; [key: string]: unknown };
   locale: unknown;
-  callService(domain: string, service: string, data?: Record<string, unknown>): Promise<unknown>;
+  callService(
+    domain: string,
+    service: string,
+    data?: Record<string, unknown>,
+    target?: Record<string, unknown>,
+    notifyOnError?: boolean,
+    returnResponse?: boolean,
+  ): Promise<unknown>;
   formatEntityState?(stateObj: HassEntity, state?: string): string;
   formatEntityAttributeValue?(stateObj: HassEntity, attribute: string, value?: unknown): string;
   localize(key: string, ...args: unknown[]): string;
@@ -43,6 +50,27 @@ export interface ThresholdConfig {
   color: string;
 }
 
+/** One entry of a calendar.get_events response. Note there is no uid. */
+export interface RawCalendarEvent {
+  start?: string;
+  end?: string;
+  summary?: string;
+  description?: string;
+  location?: string;
+  status?: string;
+}
+
+export interface CalendarEvent {
+  /** Synthesised, since the list response carries no uid. */
+  key: string;
+  summary: string;
+  location?: string;
+  /** Epoch milliseconds. All-day events span local midnight to local midnight. */
+  start: number;
+  end: number;
+  allDay: boolean;
+}
+
 export type ValueMode = "auto" | "percentage" | "value";
 export type CardShape = "theme" | "rounded";
 
@@ -60,6 +88,9 @@ export interface ProgressCardConfig {
   bar_color?: string;
   thresholds?: ThresholdConfig[];
   secondary_entities?: string[];
+  include_all_day?: boolean;
+  cycle_interval?: number;
+  look_ahead_days?: number;
   tap_action?: ActionConfig;
   hold_action?: ActionConfig;
   double_tap_action?: ActionConfig;

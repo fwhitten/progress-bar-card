@@ -3,7 +3,18 @@ import { customElement, property, state } from "lit/decorators.js";
 import { classMap } from "lit/directives/class-map.js";
 import { styleMap } from "lit/directives/style-map.js";
 import { CARD_NAME, CARD_VERSION, EDITOR_NAME } from "./const";
-import type { HassEntity, HomeAssistant, ProgressCardConfig } from "./types";
+import type { CalendarEvent, HassEntity, HomeAssistant, ProgressCardConfig } from "./types";
+import {
+  eventFromAttributes,
+  eventsInProgress,
+  fetchCalendarEvents,
+  FRESH_MAX_AGE,
+  formatDuration,
+  invalidateCalendar,
+  nextEventAfter,
+  parseEvents,
+  tickInterval,
+} from "./calendar";
 import { clamp, colorForValue, contrastingInk, handleAction } from "./utils";
 
 /* eslint-disable no-console */
@@ -15,6 +26,24 @@ console.info(
 
 const BASE_ROW_HEIGHT = 56;
 const UNAVAILABLE_STATES = new Set(["unavailable", "unknown", "none", ""]);
+
+const CALENDAR_DOMAIN = "calendar.";
+const DEFAULT_CYCLE_SECONDS = 6;
+const DEFAULT_LOOK_AHEAD_DAYS = 7;
+const CALENDAR_REFRESH_MS = 5 * 60 * 1000;
+const FADE_MS = 300;
+
+/** Everything the two content layers need, whichever mode produced it. */
+interface ViewModel {
+  available: boolean;
+  percentage: number;
+  /** The number thresholds are compared against. */
+  thresholdValue: number;
+  name: string;
+  secondary: string;
+  valueText: string;
+  showValue: boolean;
+}
 
 /** Whether a line overflows, and how far the loop travels before it repeats. */
 interface LineMetrics {
@@ -33,8 +62,21 @@ export class HaProgressCard extends LitElement {
   @state() private _name: LineMetrics = EMPTY_METRICS;
   @state() private _secondary: LineMetrics = EMPTY_METRICS;
   @state() private _ink: "light" | "dark" = "light";
+  @state() private _events: CalendarEvent[] = [];
+  @state() private _cycleIndex = 0;
+  @state() private _fade = false;
+  @state() private _now = Date.now();
 
   private _resizeObserver?: ResizeObserver;
+  private _tickTimer?: number;
+  private _cycleTimer?: number;
+  private _refreshTimer?: number;
+  private _calendarStamp?: string;
+  private _fadeTimer?: number;
+  private _runningSignature = "";
+  private _docVisible = !document.hidden;
+  private _onScreen = true;
+  private _intersectionObserver?: IntersectionObserver;
   private _holdTimer?: number;
   private _tapTimer?: number;
   private _held = false;
@@ -75,6 +117,15 @@ export class HaProgressCard extends LitElement {
       shape: "rounded",
       ...config,
     };
+
+    // Window and filtering are config-dependent, so start the calendar over.
+    if (this._isCalendar) {
+      invalidateCalendar(this._config.entity);
+      this._calendarStamp = undefined;
+      this._events = [];
+      this._cycleIndex = 0;
+      this._runningSignature = "";
+    }
   }
 
   public getCardSize(): number {
@@ -98,12 +149,25 @@ export class HaProgressCard extends LitElement {
     if (this.shadowRoot?.firstElementChild) {
       this._resizeObserver.observe(this);
     }
+
+    this._docVisible = !document.hidden;
+    document.addEventListener("visibilitychange", this._onVisibilityChange);
+    this._intersectionObserver ??= new IntersectionObserver((entries) => {
+      const onScreen = entries.some((entry) => entry.isIntersecting);
+      if (onScreen === this._onScreen) return;
+      this._onScreen = onScreen;
+      this._wake();
+    });
+    this._intersectionObserver.observe(this);
   }
 
   public override disconnectedCallback(): void {
     super.disconnectedCallback();
     this._resizeObserver?.disconnect();
+    this._intersectionObserver?.disconnect();
+    document.removeEventListener("visibilitychange", this._onVisibilityChange);
     this._clearTimers();
+    this._stopCalendar();
   }
 
   private get _stateObj(): HassEntity | undefined {
@@ -155,6 +219,205 @@ export class HaProgressCard extends LitElement {
       .join(" • ");
   }
 
+  private get _isCalendar(): boolean {
+    return Boolean(this._config?.entity?.startsWith(CALENDAR_DOMAIN));
+  }
+
+  private get _calendarOptions() {
+    return {
+      includeAllDay: this._config?.include_all_day !== false,
+      lookAhead: Math.max(1, Number(this._config?.look_ahead_days ?? DEFAULT_LOOK_AHEAD_DAYS)),
+      cycleMs:
+        Math.max(1, Number(this._config?.cycle_interval ?? DEFAULT_CYCLE_SECONDS)) * 1000,
+    };
+  }
+
+  /** Ticking and cycling stop while the card is off-screen or the tab is hidden. */
+  private get _awake(): boolean {
+    return this._docVisible && this._onScreen;
+  }
+
+  private _numericView(stateObj: HassEntity): ViewModel {
+    const config = this._config!;
+    const numeric = Number(this._rawValue(stateObj));
+    const available = !UNAVAILABLE_STATES.has(stateObj.state) && !Number.isNaN(numeric);
+
+    const min = Number(config.min ?? 0);
+    const max = Number(config.max ?? 100);
+    const span = max - min;
+    const percentage = available && span !== 0 ? clamp(((numeric - min) / span) * 100, 0, 100) : 0;
+
+    return {
+      available,
+      percentage,
+      thresholdValue: numeric,
+      name: config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id,
+      secondary: this._secondaryText(),
+      valueText: available ? this._formatValue(stateObj, numeric, percentage) : "",
+      showValue: config.show_value !== false && available,
+    };
+  }
+
+  /**
+   * A running event drives the bar; with nothing running the bar sits empty and
+   * the secondary line counts down to the next event's start.
+   */
+  private _calendarView(stateObj: HassEntity): ViewModel {
+    const config = this._config!;
+    const now = this._now;
+    const running = eventsInProgress(this._events, now);
+    const event = running.length
+      ? running[this._cycleIndex % running.length]
+      : nextEventAfter(this._events, now);
+    const extras = this._secondaryText();
+
+    if (!event) {
+      return {
+        available: false,
+        percentage: 0,
+        thresholdValue: 0,
+        name: config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id,
+        secondary: extras || "No upcoming events",
+        valueText: "",
+        showValue: false,
+      };
+    }
+
+    const active = event.start <= now && now < event.end;
+    const span = event.end - event.start;
+    const percentage = active && span > 0 ? clamp(((now - event.start) / span) * 100, 0, 100) : 0;
+    const countdown = active
+      ? formatDuration(event.end - now)
+      : `in ${formatDuration(event.start - now)}`;
+
+    return {
+      available: true,
+      percentage,
+      thresholdValue: percentage,
+      name: config.name ?? event.summary,
+      secondary: [countdown, extras].filter(Boolean).join(" • "),
+      valueText: `${Math.round(percentage)}%`,
+      showValue: config.show_value !== false,
+    };
+  }
+
+  private async _loadEvents(fresh: boolean): Promise<void> {
+    const entity = this._config?.entity;
+    if (!this.hass || !entity || !this._isCalendar) return;
+
+    const { includeAllDay, lookAhead } = this._calendarOptions;
+    try {
+      const raw = await fetchCalendarEvents(
+        this.hass,
+        entity,
+        lookAhead,
+        fresh ? FRESH_MAX_AGE : undefined,
+      );
+      this._events = parseEvents(raw, includeAllDay);
+    } catch (_err) {
+      // get_events may be unavailable. The entity still exposes one event.
+      const fallback = eventFromAttributes(this._stateObj?.attributes ?? {}, includeAllDay);
+      this._events = fallback ? [fallback] : [];
+    }
+
+    this._now = Date.now();
+    this._runningSignature = "";
+    this._syncCycle();
+    this._scheduleTick();
+  }
+
+  private _syncCalendar(): void {
+    if (!this._isCalendar) {
+      this._stopCalendar();
+      return;
+    }
+    if (!this.hass) return;
+
+    const stamp = this._stateObj?.last_updated;
+    if (stamp !== this._calendarStamp) {
+      this._calendarStamp = stamp;
+      void this._loadEvents(true);
+    }
+    if (!this._refreshTimer) {
+      this._refreshTimer = window.setInterval(
+        () => void this._loadEvents(true),
+        CALENDAR_REFRESH_MS,
+      );
+    }
+    if (!this._tickTimer) this._scheduleTick();
+  }
+
+  private _scheduleTick(): void {
+    if (this._tickTimer) window.clearTimeout(this._tickTimer);
+    this._tickTimer = undefined;
+    if (!this._isCalendar || !this._awake) return;
+
+    const now = Date.now();
+    const running = eventsInProgress(this._events, now);
+    const next = nextEventAfter(this._events, now);
+    const boundary = running.length
+      ? Math.min(...running.map((event) => event.end))
+      : next?.start;
+
+    this._tickTimer = window.setTimeout(
+      () => {
+        this._now = Date.now();
+        this._syncCycle();
+        this._scheduleTick();
+      },
+      tickInterval(boundary === undefined ? Number.POSITIVE_INFINITY : boundary - now),
+    );
+  }
+
+  /** Only restarts the cycle when the set of running events actually changes. */
+  private _syncCycle(): void {
+    const running = eventsInProgress(this._events, Date.now());
+    const signature = running.map((event) => event.key).join("|");
+    if (signature === this._runningSignature) return;
+
+    this._runningSignature = signature;
+    this._cycleIndex = 0;
+    this._fade = false;
+    this._scheduleCycle(running.length);
+  }
+
+  private _scheduleCycle(count: number): void {
+    if (this._cycleTimer) window.clearInterval(this._cycleTimer);
+    this._cycleTimer = undefined;
+    if (count < 2 || !this._awake) return;
+
+    this._cycleTimer = window.setInterval(() => {
+      this._fade = true;
+      if (this._fadeTimer) window.clearTimeout(this._fadeTimer);
+      this._fadeTimer = window.setTimeout(() => {
+        this._cycleIndex = (this._cycleIndex + 1) % count;
+        this._fade = false;
+      }, FADE_MS);
+    }, this._calendarOptions.cycleMs);
+  }
+
+  private _stopCalendar(): void {
+    [this._tickTimer, this._fadeTimer].forEach((id) => id && window.clearTimeout(id));
+    [this._cycleTimer, this._refreshTimer].forEach((id) => id && window.clearInterval(id));
+    this._tickTimer = undefined;
+    this._fadeTimer = undefined;
+    this._cycleTimer = undefined;
+    this._refreshTimer = undefined;
+  }
+
+  private _onVisibilityChange = (): void => {
+    this._docVisible = !document.hidden;
+    this._wake();
+  };
+
+  private _wake(): void {
+    if (!this._isCalendar) return;
+    this._now = Date.now();
+    this._runningSignature = "";
+    this._syncCycle();
+    this._scheduleTick();
+  }
+
   protected override render(): TemplateResult | typeof nothing {
     if (!this._config || !this.hass) return nothing;
 
@@ -178,21 +441,14 @@ export class HaProgressCard extends LitElement {
       `;
     }
 
-    const raw = this._rawValue(stateObj);
-    const numeric = Number(raw);
-    const available = !UNAVAILABLE_STATES.has(stateObj.state) && !Number.isNaN(numeric);
+    const view = this._isCalendar ? this._calendarView(stateObj) : this._numericView(stateObj);
+    const { available, percentage, name, secondary: secondaryText, valueText, showValue } = view;
 
-    const min = Number(this._config.min ?? 0);
-    const max = Number(this._config.max ?? 100);
-    const span = max - min;
-    const percentage = available && span !== 0 ? clamp(((numeric - min) / span) * 100, 0, 100) : 0;
-
-    const barColor = colorForValue(numeric, this._config.thresholds, this._config.bar_color);
-    const name = this._config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id;
-    const valueText = available ? this._formatValue(stateObj, numeric, percentage) : "";
-
-    const secondaryText = this._secondaryText();
-    const showValue = this._config.show_value !== false && available;
+    const barColor = colorForValue(
+      view.thresholdValue,
+      this._config.thresholds,
+      this._config.bar_color,
+    );
 
     const hostStyle = styleMap({
       "--pb-radius": radius,
@@ -240,7 +496,7 @@ export class HaProgressCard extends LitElement {
   ): TemplateResult {
     const icon = this._config?.icon;
     return html`
-      <div class="content">
+      <div class=${classMap({ content: true, fade: this._fade })}>
         ${icon
           ? html`<ha-icon class="icon" .icon=${icon}></ha-icon>`
           : html`<ha-state-icon
@@ -295,6 +551,7 @@ export class HaProgressCard extends LitElement {
     super.updated(changed);
     this._measure();
     this._syncInk();
+    this._syncCalendar();
   }
 
   /** Reads back what the bar actually painted, so theme variables are honoured. */
@@ -478,6 +735,12 @@ export class HaProgressCard extends LitElement {
         align-items: center;
         gap: calc(10px * var(--pb-scale));
         padding: 0 calc(12px * var(--pb-scale));
+        transition: opacity ${FADE_MS}ms ease;
+      }
+
+      /* Crossfade when cycling between concurrent calendar events. */
+      .content.fade {
+        opacity: 0;
       }
 
       .icon {
@@ -575,7 +838,8 @@ export class HaProgressCard extends LitElement {
 
       @media (prefers-reduced-motion: reduce) {
         .fill,
-        .clip {
+        .clip,
+        .content {
           transition: none;
         }
         .line.animating .track {

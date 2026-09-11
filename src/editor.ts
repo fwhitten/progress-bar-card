@@ -16,10 +16,48 @@ const LABELS: Record<string, string> = {
   show_value: "Show value",
   bar_color: "Bar colour",
   secondary_entities: "Secondary entities (max 2)",
+  include_all_day: "Include all-day events",
+  cycle_interval: "Seconds between events",
+  look_ahead_days: "Look ahead (days)",
   tap_action: "Tap action",
   hold_action: "Hold action",
   double_tap_action: "Double tap action",
 };
+
+const SHAPE_SELECTOR = {
+  select: {
+    mode: "dropdown",
+    options: [
+      { value: "rounded", label: "Fully rounded" },
+      { value: "theme", label: "Theme radius" },
+    ],
+  },
+};
+
+const CALENDAR_SCHEMA = [
+  {
+    name: "",
+    type: "grid",
+    schema: [
+      { name: "shape", selector: SHAPE_SELECTOR },
+      {
+        name: "cycle_interval",
+        selector: { number: { mode: "box", min: 1, max: 120, step: 1, unit_of_measurement: "s" } },
+      },
+    ],
+  },
+  {
+    name: "",
+    type: "grid",
+    schema: [
+      {
+        name: "look_ahead_days",
+        selector: { number: { mode: "box", min: 1, max: 60, step: 1 } },
+      },
+      { name: "include_all_day", selector: { boolean: {} } },
+    ],
+  },
+];
 
 const SCHEMA = [
   { name: "entity", required: true, selector: { entity: {} } },
@@ -61,20 +99,12 @@ const SCHEMA = [
           },
         },
       },
-      {
-        name: "shape",
-        selector: {
-          select: {
-            mode: "dropdown",
-            options: [
-              { value: "rounded", label: "Fully rounded" },
-              { value: "theme", label: "Theme radius" },
-            ],
-          },
-        },
-      },
+      { name: "shape", selector: SHAPE_SELECTOR },
     ],
   },
+];
+
+const TAIL_SCHEMA = [
   { name: "show_value", selector: { boolean: {} } },
   { name: "bar_color", selector: { ui_color: { default_color: "primary" } } },
   { name: "secondary_entities", selector: { entity: { multiple: true } } },
@@ -125,6 +155,25 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
     return this._config?.thresholds ?? [];
   }
 
+  /**
+   * Calendar entities drive the bar from event timings, so the range and value
+   * options are meaningless for them and the cycling options take their place.
+   */
+  private get _schema() {
+    const isCalendar = Boolean(this._config?.entity?.startsWith("calendar."));
+    const head = isCalendar
+      ? SCHEMA.filter(
+          (item) => !["attribute"].includes(item.name) && !this._isRangeGrid(item),
+        )
+      : SCHEMA;
+    return [...head, ...(isCalendar ? CALENDAR_SCHEMA : []), ...TAIL_SCHEMA];
+  }
+
+  private _isRangeGrid(item: { type?: string; schema?: { name: string }[] }): boolean {
+    if (item.type !== "grid" || !item.schema) return false;
+    return item.schema.some((field) => ["min", "max", "value_mode"].includes(field.name));
+  }
+
   protected override render(): TemplateResult | typeof nothing {
     if (!this._config || !this.hass) return nothing;
 
@@ -136,7 +185,7 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
         <ha-form
           .hass=${this.hass}
           .data=${formData}
-          .schema=${SCHEMA}
+          .schema=${this._schema}
           .computeLabel=${this._computeLabel}
           @value-changed=${this._formChanged}
         ></ha-form>

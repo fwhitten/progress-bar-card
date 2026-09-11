@@ -12,6 +12,7 @@ Built for the **sections** dashboard layout: one grid row tall by default, resiz
 ## Features
 
 - Works with any numeric entity, or a numeric **attribute** of any entity
+- Works with **calendar entities** too: progress through the current event, with a live countdown
 - Fully configurable from the **visual editor** — no YAML required
 - Configurable range (defaults to `0`–`100`)
 - Value shown on the right as a whole-number percentage or the entity's own formatted value
@@ -22,6 +23,47 @@ Built for the **sections** dashboard layout: one grid row tall by default, resiz
 - Theme card background, theme corner radius or fully rounded
 - Animated fill, light and dark mode, `prefers-reduced-motion` aware
 - Standard tap / hold / double-tap actions
+
+## Calendar entities
+
+Point the card at a `calendar.` entity and it switches modes automatically.
+
+- While an event is running, the bar tracks progress from its start to its end, and the secondary
+  line counts down the time remaining.
+- With nothing running, the bar sits empty and the secondary line counts down to the **next**
+  event's start (`in 2h 15m`).
+- When several events are running **at the same time**, the card crossfades between them.
+- The name is the event title (auto-scrolling if long) and the value is percent elapsed. Your
+  `name` and `icon` overrides still win if you set them.
+- With no upcoming events the card dims and shows "No upcoming events".
+
+```yaml
+type: custom:ha-progress-card
+entity: calendar.work
+bar_color: blue
+cycle_interval: 6
+look_ahead_days: 7
+include_all_day: true
+```
+
+Countdowns show the two most significant units, with seconds only once under an hour:
+`3d 4h`, `2h 15m`, `4m 20s`, `45s`.
+
+### How it gets the events
+
+A calendar entity only ever exposes **one** event in its attributes, so the card calls the
+`calendar.get_events` action to see everything in the look-ahead window — that is what makes
+cycling between concurrent events possible. Responses are cached for five minutes and **shared
+between cards**, so three cards on the same calendar make one request, not three. The card also
+refetches whenever the entity's state changes. If `get_events` is unavailable, it falls back to
+the single event in the entity's attributes.
+
+The card runs its own clock so the bar and countdown advance between state updates: once a second
+when the next boundary is under an hour away, once a minute otherwise, and **not at all** while
+the card is off-screen or the browser tab is hidden.
+
+Note that all-day events span local midnight to local midnight, so an all-day event shows as
+progress through the day. Turn `include_all_day` off to ignore them.
 
 ## Installation
 
@@ -90,6 +132,17 @@ thresholds:
 | `thresholds` | list | — | List of `{ value, color }` stops |
 | `secondary_entities` | list | — | Up to two entities shown dot-separated under the name |
 | `tap_action` | action | `more-info` | Standard Home Assistant action |
+
+### Calendar-only options
+
+These appear in the editor only when the entity is a calendar. `attribute`, `min`, `max` and
+`value_mode` do not apply to calendars and are hidden.
+
+| Name | Type | Default | Description |
+| --- | --- | --- | --- |
+| `cycle_interval` | number | `6` | Seconds each event is shown before crossfading to the next concurrent one |
+| `look_ahead_days` | number | `7` | How far ahead to search for events |
+| `include_all_day` | boolean | `true` | Include all-day events |
 | `hold_action` | action | `none` | Standard Home Assistant action |
 | `double_tap_action` | action | `none` | Standard Home Assistant action |
 
