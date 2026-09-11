@@ -108,6 +108,7 @@ const SCHEMA = [
   {
     name: "pin",
     type: "expandable",
+    flatten: true,
     icon: "mdi:pin",
     title: "Pin value on state",
     schema: [
@@ -141,7 +142,7 @@ const TAIL_SCHEMA = [
   {
     name: "interactions",
     type: "expandable",
-    iconPath: undefined,
+    flatten: true,
     icon: "mdi:gesture-tap",
     title: "Interactions",
     schema: [

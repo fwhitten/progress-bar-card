@@ -27,6 +27,24 @@ console.info(
 const BASE_ROW_HEIGHT = 56;
 const UNAVAILABLE_STATES = new Set(["unavailable", "unknown", "none", ""]);
 
+/**
+ * The editor's expandable sections were missing ha-form's `flatten`, so it
+ * saved their fields nested under the section name instead of at the top
+ * level. Hoist those back out so configs written by older versions still work.
+ */
+const NESTED_SECTIONS = ["interactions", "pin"] as const;
+
+const hoistSections = (config: ProgressCardConfig): ProgressCardConfig => {
+  let result = config as ProgressCardConfig & Record<string, unknown>;
+  for (const section of NESTED_SECTIONS) {
+    const nested = result[section];
+    if (!nested || typeof nested !== "object" || Array.isArray(nested)) continue;
+    result = { ...result, ...(nested as Partial<ProgressCardConfig>) };
+    delete result[section];
+  }
+  return result;
+};
+
 const CALENDAR_DOMAIN = "calendar.";
 const DEFAULT_CYCLE_SECONDS = 6;
 const DEFAULT_LOOK_AHEAD_DAYS = 7;
@@ -115,7 +133,7 @@ export class HaProgressCard extends LitElement {
       show_value: true,
       value_mode: "auto",
       shape: "rounded",
-      ...config,
+      ...hoistSections(config),
     };
 
     // Window and filtering are config-dependent, so start the calendar over.
