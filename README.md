@@ -200,8 +200,17 @@ npm install
 npm run build
 ```
 
-The bundle is written to `dist/ha-progress-card.js`. Releases are built by GitHub Actions and the
-bundle is attached to the release, which is what HACS installs.
+The bundle is written to `dist/ha-progress-card.js`, which is what HACS installs.
+
+To cut a release, attach the bundle **when creating it** rather than letting CI add it afterwards:
+
+```bash
+npm run build && gh release create vX.Y.Z dist/ha-progress-card.js --title vX.Y.Z --notes "..."
+```
+
+A release that exists without its asset, even briefly, reads as a non-compliant repository to
+HACS. The release workflow runs on the tag and re-uploads the CI-built bundle over the top, so
+pushing a bare tag also produces a complete release.
 
 ## Licence
 
