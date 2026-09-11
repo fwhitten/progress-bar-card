@@ -88,6 +88,10 @@ export interface ProgressCardConfig {
   bar_color?: string;
   thresholds?: ThresholdConfig[];
   secondary_entities?: string[];
+  /** While `pin_entity` sits in one of `pin_states`, the bar is forced to `pin_value`. */
+  pin_entity?: string;
+  pin_states?: string[];
+  pin_value?: "max" | "min" | number | string;
   include_all_day?: boolean;
   cycle_interval?: number;
   look_ahead_days?: number;

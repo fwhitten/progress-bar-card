@@ -184,7 +184,12 @@ export class HaProgressCard extends LitElement {
     return stateObj.attributes.unit_of_measurement;
   }
 
-  private _formatValue(stateObj: HassEntity, numeric: number, percentage: number): string {
+  private _formatValue(
+    stateObj: HassEntity,
+    numeric: number,
+    percentage: number,
+    pinned: boolean,
+  ): string {
     const config = this._config!;
     const unit = this._unit(stateObj);
     const mode = config.value_mode ?? "auto";
@@ -193,6 +198,11 @@ export class HaProgressCard extends LitElement {
 
     if (usePercentage) {
       return `${Math.round(percentage)}%`;
+    }
+
+    // The entity still reports its own (meaningless) value while pinned.
+    if (pinned) {
+      return unit ? `${numeric} ${unit}` : `${numeric}`;
     }
 
     if (config.attribute) {
@@ -237,10 +247,41 @@ export class HaProgressCard extends LitElement {
     return this._docVisible && this._onScreen;
   }
 
+  /**
+   * Appliances commonly reset their progress sensor to 0 the moment a cycle
+   * ends, so a linked entity can pin the bar while it reports a finished state.
+   * Checked ahead of availability: the progress entity often goes unavailable
+   * at exactly the same moment.
+   */
+  private _pinnedValue(): number | undefined {
+    const config = this._config;
+    if (!config?.pin_states?.length || !this.hass) return undefined;
+
+    const stateObj = this.hass.states[config.pin_entity ?? config.entity];
+    if (!stateObj) return undefined;
+
+    // Home Assistant translates states for display, so match the raw value.
+    const current = stateObj.state?.toLowerCase();
+    const matched = config.pin_states.some((state) => String(state).toLowerCase() === current);
+    if (!matched) return undefined;
+
+    const min = Number(config.min ?? 0);
+    const max = Number(config.max ?? 100);
+    const pin = config.pin_value ?? "max";
+    if (pin === "max") return max;
+    if (pin === "min") return min;
+
+    const numeric = Number(pin);
+    return Number.isNaN(numeric) ? max : numeric;
+  }
+
   private _numericView(stateObj: HassEntity): ViewModel {
     const config = this._config!;
-    const numeric = Number(this._rawValue(stateObj));
-    const available = !UNAVAILABLE_STATES.has(stateObj.state) && !Number.isNaN(numeric);
+    const pinned = this._pinnedValue();
+    const numeric = pinned ?? Number(this._rawValue(stateObj));
+    const available =
+      pinned !== undefined ||
+      (!UNAVAILABLE_STATES.has(stateObj.state) && !Number.isNaN(numeric));
 
     const min = Number(config.min ?? 0);
     const max = Number(config.max ?? 100);
@@ -253,7 +294,9 @@ export class HaProgressCard extends LitElement {
       thresholdValue: numeric,
       name: config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id,
       secondary: this._secondaryText(),
-      valueText: available ? this._formatValue(stateObj, numeric, percentage) : "",
+      valueText: available
+        ? this._formatValue(stateObj, numeric, percentage, pinned !== undefined)
+        : "",
       showValue: config.show_value !== false && available,
     };
   }

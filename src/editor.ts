@@ -16,6 +16,9 @@ const LABELS: Record<string, string> = {
   show_value: "Show value",
   bar_color: "Bar colour",
   secondary_entities: "Secondary entities (max 2)",
+  pin_entity: "Pin when this entity...",
+  pin_states: "...is in one of these states",
+  pin_value: "Pin the bar to",
   include_all_day: "Include all-day events",
   cycle_interval: "Seconds between events",
   look_ahead_days: "Look ahead (days)",
@@ -102,6 +105,33 @@ const SCHEMA = [
       { name: "shape", selector: SHAPE_SELECTOR },
     ],
   },
+  {
+    name: "pin",
+    type: "expandable",
+    icon: "mdi:pin",
+    title: "Pin value on state",
+    schema: [
+      { name: "pin_entity", selector: { entity: {} } },
+      {
+        name: "pin_states",
+        selector: { state: { multiple: true } },
+        context: { filter_entity: "pin_entity" },
+      },
+      {
+        name: "pin_value",
+        selector: {
+          select: {
+            mode: "dropdown",
+            custom_value: true,
+            options: [
+              { value: "max", label: "Maximum" },
+              { value: "min", label: "Minimum" },
+            ],
+          },
+        },
+      },
+    ],
+  },
 ];
 
 const TAIL_SCHEMA = [
@@ -163,7 +193,7 @@ export class HaProgressCardEditor extends LitElement implements LovelaceCardEdit
     const isCalendar = Boolean(this._config?.entity?.startsWith("calendar."));
     const head = isCalendar
       ? SCHEMA.filter(
-          (item) => !["attribute"].includes(item.name) && !this._isRangeGrid(item),
+          (item) => !["attribute", "pin"].includes(item.name) && !this._isRangeGrid(item),
         )
       : SCHEMA;
     return [...head, ...(isCalendar ? CALENDAR_SCHEMA : []), ...TAIL_SCHEMA];

@@ -19,6 +19,7 @@ Built for the **sections** dashboard layout: one grid row tall by default, resiz
 - Name and secondary line **auto-scroll** when they don't fit
 - Up to two extra entity states on a second line, dot separated
 - Optional **colour thresholds** — the bar recolours as the value moves
+- Optionally **pin the bar** to a value while a linked entity reports a given state
 - Icon and text contrast is computed from the bar colour so it stays readable either way
 - Theme card background, theme corner radius or fully rounded
 - Animated fill, light and dark mode, `prefers-reduced-motion` aware
@@ -131,7 +132,37 @@ thresholds:
 | `bar_color` | string | `primary` | Bar colour when no threshold applies |
 | `thresholds` | list | — | List of `{ value, color }` stops |
 | `secondary_entities` | list | — | Up to two entities shown dot-separated under the name |
+| `pin_entity` | string | the card's entity | Entity whose state can pin the bar |
+| `pin_states` | list | — | States that trigger the pin |
+| `pin_value` | string/number | `max` | `max`, `min`, or a specific number |
 | `tap_action` | action | `more-info` | Standard Home Assistant action |
+
+### Pinning the bar to a value
+
+Many appliances reset their progress sensor to `0` the instant a cycle ends, so the bar snaps from
+100% back to empty while the machine is still sitting there finished. If the appliance exposes a
+separate state entity, `pin_*` holds the bar where it belongs:
+
+```yaml
+type: custom:ha-progress-card
+entity: sensor.bosch_dishwasher_progress
+pin_entity: sensor.bosch_dishwasher_operation_state
+pin_states: [finished]
+pin_value: max
+```
+
+Nothing here is manufacturer-specific — any entity and any states will do, and the whole thing is
+optional. A few details worth knowing:
+
+- States are matched **case-insensitively against the raw state**, not the translated one shown in
+  the UI. Home Connect reports `finished`, `run`, `ready`; other integrations differ. The editor's
+  state picker lists the entity's real states for you, so you rarely need to type one.
+- The pin is checked **before** availability, so it still holds if the progress sensor drops to
+  `unavailable` when the cycle ends — which many of them do.
+- Thresholds are evaluated against the pinned value, so pinning to `max` will pick up a
+  "100 → green" threshold.
+- `pin_entity` may be omitted, in which case the card's own entity is used.
+- Not applicable to calendar entities; the option is hidden for them in the editor.
 
 ### Calendar-only options
 
