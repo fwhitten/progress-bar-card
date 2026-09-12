@@ -20,6 +20,7 @@ Built for the **sections** dashboard layout: one grid row tall by default, resiz
 - Up to two extra entity states on a second line, dot separated
 - Optional **colour thresholds** — the bar recolours as the value moves
 - Optionally **pin the bar** to a value while a linked entity reports a given state
+- Show any entity's state as the right-hand value, optionally split onto centred lines
 - Icon and text contrast is computed from the bar colour so it stays readable either way
 - Theme card background, theme corner radius or fully rounded
 - Animated fill, light and dark mode, `prefers-reduced-motion` aware
@@ -49,6 +50,24 @@ include_all_day: true
 
 Countdowns show the two most significant units, with seconds only once under an hour:
 `3d 4h`, `2h 15m`, `4m 20s`, `45s`.
+
+### Hiding the card when there is nothing on
+
+`hide_when` removes the card from the view entirely rather than showing an empty bar:
+
+```yaml
+type: custom:ha-progress-card
+entity: calendar.work
+hide_when: no_events_today
+```
+
+- `no_events_today` hides it once nothing is running and nothing else starts before midnight.
+  An event already in progress counts, including a multi-day one.
+- `no_events` hides it only when the look-ahead window is completely empty.
+
+In a sections view the grid collapses the space, so the cards below move up. The card stays
+visible while you are editing the dashboard, so it remains configurable when empty, and it
+reappears on its own as soon as an event turns up.
 
 ### How it gets the events
 
@@ -128,6 +147,8 @@ thresholds:
 | `max` | number | `100` | Value that renders as a full bar |
 | `show_value` | boolean | `true` | Show the value on the right |
 | `value_mode` | string | `auto` | `auto`, `percentage` or `value` |
+| `value_entity` | string | — | Show this entity's state as the value instead |
+| `value_wrap` | boolean | `false` | Break the value at spaces, one centred line per word |
 | `shape` | string | `rounded` | `rounded` (pill) or `theme` (theme corner radius) |
 | `bar_color` | string | `primary` | Bar colour when no threshold applies |
 | `thresholds` | list | — | List of `{ value, color }` stops |
@@ -136,6 +157,22 @@ thresholds:
 | `pin_states` | list | — | States that trigger the pin |
 | `pin_value` | string/number | `max` | `max`, `min`, or a specific number |
 | `tap_action` | action | `more-info` | Standard Home Assistant action |
+
+### Choosing what the value shows
+
+By default the right-hand value is derived from the entity itself. Point `value_entity` at
+anything else to show that instead — a remaining-time sensor, say, while the bar still tracks
+progress:
+
+```yaml
+entity: sensor.bosch_dishwasher_progress
+value_entity: sensor.bosch_dishwasher_remaining_time
+value_wrap: true
+```
+
+`value_wrap` breaks the value at each space and centres the parts on their own lines, so
+`2h 17m` becomes a stacked `2h` / `17m`. On a one-row card that buys back a useful amount of
+width for the name.
 
 ### Pinning the bar to a value
 
@@ -174,6 +211,7 @@ These appear in the editor only when the entity is a calendar. `attribute`, `min
 | `cycle_interval` | number | `6` | Seconds each event is shown before crossfading to the next concurrent one |
 | `look_ahead_days` | number | `7` | How far ahead to search for events |
 | `include_all_day` | boolean | `true` | Include all-day events |
+| `hide_when` | string | `never` | `never`, `no_events_today` or `no_events` |
 | `hold_action` | action | `none` | Standard Home Assistant action |
 | `double_tap_action` | action | `none` | Standard Home Assistant action |
 

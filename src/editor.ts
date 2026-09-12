@@ -19,6 +19,9 @@ const LABELS: Record<string, string> = {
   pin_entity: "Pin when this entity...",
   pin_states: "...is in one of these states",
   pin_value: "Pin the bar to",
+  value_entity: "Value entity (replaces the value)",
+  value_wrap: "Split value onto separate lines",
+  hide_when: "Hide the card when",
   include_all_day: "Include all-day events",
   cycle_interval: "Seconds between events",
   look_ahead_days: "Look ahead (days)",
@@ -59,6 +62,19 @@ const CALENDAR_SCHEMA = [
       },
       { name: "include_all_day", selector: { boolean: {} } },
     ],
+  },
+  {
+    name: "hide_when",
+    selector: {
+      select: {
+        mode: "dropdown",
+        options: [
+          { value: "never", label: "Never" },
+          { value: "no_events_today", label: "No events left today" },
+          { value: "no_events", label: "No events at all" },
+        ],
+      },
+    },
   },
 ];
 
@@ -137,6 +153,8 @@ const SCHEMA = [
 
 const TAIL_SCHEMA = [
   { name: "show_value", selector: { boolean: {} } },
+  { name: "value_entity", selector: { entity: {} } },
+  { name: "value_wrap", selector: { boolean: {} } },
   { name: "bar_color", selector: { ui_color: { default_color: "primary" } } },
   { name: "secondary_entities", selector: { entity: { multiple: true } } },
   {

@@ -92,6 +92,12 @@ export interface ProgressCardConfig {
   pin_entity?: string;
   pin_states?: string[];
   pin_value?: "max" | "min" | number | string;
+  /** Replaces the right-hand value with another entity's formatted state. */
+  value_entity?: string;
+  /** Break the right-hand value at spaces, one centred line per word. */
+  value_wrap?: boolean;
+  /** Calendar only: when the card should remove itself from the view. */
+  hide_when?: "never" | "no_events_today" | "no_events";
   include_all_day?: boolean;
   cycle_interval?: number;
   look_ahead_days?: number;

@@ -15,7 +15,7 @@ import {
   parseEvents,
   tickInterval,
 } from "./calendar";
-import { clamp, colorForValue, contrastingInk, handleAction } from "./utils";
+import { clamp, colorForValue, contrastingInk, fireEvent, handleAction } from "./utils";
 
 /* eslint-disable no-console */
 console.info(
@@ -74,6 +74,14 @@ const EMPTY_METRICS: LineMetrics = { scroll: false, dist: 0 };
 @customElement(CARD_NAME)
 export class HaProgressCard extends LitElement {
   @property({ attribute: false }) public hass?: HomeAssistant;
+  @property({ type: Boolean }) public preview = false;
+  @property({ type: Boolean }) public editMode = false;
+
+  /**
+   * Without this, hui-card detaches the element while it is hidden, which would
+   * stop the clock that decides when to show it again.
+   */
+  public connectedWhileHidden = true;
 
   @state() private _config?: ProgressCardConfig;
   @state() private _scale = 1;
@@ -84,6 +92,7 @@ export class HaProgressCard extends LitElement {
   @state() private _cycleIndex = 0;
   @state() private _fade = false;
   @state() private _now = Date.now();
+  @state() private _eventsLoaded = false;
 
   private _resizeObserver?: ResizeObserver;
   private _tickTimer?: number;
@@ -234,6 +243,14 @@ export class HaProgressCard extends LitElement {
     return unit ? `${numeric} ${unit}` : `${numeric}`;
   }
 
+  private _customValueText(): string | undefined {
+    const entityId = this._config?.value_entity;
+    if (!entityId || !this.hass) return undefined;
+    const stateObj = this.hass.states[entityId];
+    if (!stateObj) return undefined;
+    return this.hass.formatEntityState?.(stateObj) ?? stateObj.state;
+  }
+
   private _secondaryText(): string {
     const entities = this._config?.secondary_entities?.slice(0, 2) ?? [];
     if (!entities.length || !this.hass) return "";
@@ -312,9 +329,11 @@ export class HaProgressCard extends LitElement {
       thresholdValue: numeric,
       name: config.name ?? stateObj.attributes.friendly_name ?? stateObj.entity_id,
       secondary: this._secondaryText(),
-      valueText: available
-        ? this._formatValue(stateObj, numeric, percentage, pinned !== undefined)
-        : "",
+      valueText:
+        this._customValueText() ??
+        (available
+          ? this._formatValue(stateObj, numeric, percentage, pinned !== undefined)
+          : ""),
       showValue: config.show_value !== false && available,
     };
   }
@@ -357,7 +376,7 @@ export class HaProgressCard extends LitElement {
       thresholdValue: percentage,
       name: config.name ?? event.summary,
       secondary: [countdown, extras].filter(Boolean).join(" • "),
-      valueText: `${Math.round(percentage)}%`,
+      valueText: this._customValueText() ?? `${Math.round(percentage)}%`,
       showValue: config.show_value !== false,
     };
   }
@@ -381,10 +400,38 @@ export class HaProgressCard extends LitElement {
       this._events = fallback ? [fallback] : [];
     }
 
+    this._eventsLoaded = true;
     this._now = Date.now();
     this._runningSignature = "";
     this._syncCycle();
     this._scheduleTick();
+  }
+
+  /**
+   * "Today" means anything overlapping now through midnight, so an event
+   * already running (including a multi-day one) still counts.
+   */
+  private _shouldHide(): boolean {
+    const mode = this._config?.hide_when ?? "never";
+    if (mode === "never" || !this._isCalendar) return false;
+    // Staying visible in the editor keeps the card configurable when empty.
+    if (this.preview || this.editMode) return false;
+    // Avoid flashing hidden before the first fetch has resolved.
+    if (!this._eventsLoaded) return false;
+
+    if (mode === "no_events") return this._events.length === 0;
+
+    const endOfToday = new Date(this._now);
+    endOfToday.setHours(23, 59, 59, 999);
+    const limit = endOfToday.getTime();
+    return !this._events.some((event) => event.start <= limit && event.end > this._now);
+  }
+
+  private _syncVisibility(): void {
+    const hide = this._shouldHide();
+    if (this.hidden === hide) return;
+    this.hidden = hide;
+    fireEvent(this, "card-visibility-changed", { value: !hide });
   }
 
   private _syncCalendar(): void {
@@ -569,7 +616,7 @@ export class HaProgressCard extends LitElement {
           ${this._renderLine("name", name, this._name)}
           ${secondary ? this._renderLine("secondary", secondary, this._secondary) : nothing}
         </div>
-        ${showValue ? html`<div class="value">${valueText}</div>` : nothing}
+        ${showValue ? this._renderValue(valueText) : nothing}
       </div>
     `;
   }
@@ -599,6 +646,16 @@ export class HaProgressCard extends LitElement {
     `;
   }
 
+  private _renderValue(valueText: string): TemplateResult {
+    if (!this._config?.value_wrap) {
+      return html`<div class="value">${valueText}</div>`;
+    }
+    const parts = valueText.split(/\s+/).filter(Boolean);
+    return html`<div class="value wrap">
+      ${parts.map((part) => html`<span>${part}</span>`)}
+    </div>`;
+  }
+
   private _duration(distance: number): number {
     return Math.max(4, Math.round(distance / 30));
   }
@@ -613,6 +670,7 @@ export class HaProgressCard extends LitElement {
     this._measure();
     this._syncInk();
     this._syncCalendar();
+    this._syncVisibility();
   }
 
   /** Reads back what the bar actually painted, so theme variables are honoured. */
@@ -720,6 +778,10 @@ export class HaProgressCard extends LitElement {
 
   static override get styles() {
     return css`
+      :host([hidden]) {
+        display: none !important;
+      }
+
       :host {
         display: block;
         height: 100%;
@@ -877,6 +939,16 @@ export class HaProgressCard extends LitElement {
         font-weight: 400;
         line-height: 1;
         padding-inline-start: calc(8px * var(--pb-scale));
+      }
+
+      /* One word per line, centred, so a wide value costs less width. */
+      .value.wrap {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        text-align: center;
+        font-size: calc(15px * var(--pb-scale));
+        line-height: 1.12;
       }
 
       .line.animating .track {
