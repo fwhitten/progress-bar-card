@@ -12,6 +12,7 @@ const LABELS: Record<string, string> = {
   min: "Minimum",
   max: "Maximum",
   shape: "Corner style",
+  design: "Progress style",
   value_mode: "Value display",
   show_value: "Show value",
   bar_color: "Bar colour",
@@ -36,6 +37,17 @@ const SHAPE_SELECTOR = {
     options: [
       { value: "rounded", label: "Fully rounded" },
       { value: "theme", label: "Theme radius" },
+    ],
+  },
+};
+
+const DESIGN_SELECTOR = {
+  select: {
+    mode: "dropdown",
+    options: [
+      { value: "fill", label: "Fill" },
+      { value: "ring", label: "Ring" },
+      { value: "dots", label: "Dots" },
     ],
   },
 };
@@ -101,6 +113,7 @@ const SCHEMA = [
       { name: "max", selector: { number: { mode: "box", step: "any" } } },
     ],
   },
+  { name: "design", selector: DESIGN_SELECTOR },
   {
     name: "",
     type: "grid",

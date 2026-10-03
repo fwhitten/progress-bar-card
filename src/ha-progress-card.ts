@@ -25,6 +25,13 @@ console.info(
 );
 
 const BASE_ROW_HEIGHT = 56;
+/** From about three rows up, the fill rises from the bottom behind a giant value. */
+const TALL_FILL_HEIGHT = 150;
+/** From four rows up, the ring stands on its own above the text. */
+const TALL_RING_HEIGHT = 220;
+/** Below this the dots sit inline beside the text instead of filling the card. */
+const COMPACT_HEIGHT = 90;
+const DOT_CELL = 26;
 const UNAVAILABLE_STATES = new Set(["unavailable", "unknown", "none", ""]);
 
 /**
@@ -85,6 +92,7 @@ export class HaProgressCard extends LitElement {
 
   @state() private _config?: ProgressCardConfig;
   @state() private _scale = 1;
+  @state() private _size = { w: 0, h: 0 };
   @state() private _name: LineMetrics = EMPTY_METRICS;
   @state() private _secondary: LineMetrics = EMPTY_METRICS;
   @state() private _ink: "light" | "dark" = "light";
@@ -129,6 +137,7 @@ export class HaProgressCard extends LitElement {
       show_value: true,
       value_mode: "auto",
       shape: "rounded",
+      design: "fill",
     };
   }
 
@@ -142,6 +151,7 @@ export class HaProgressCard extends LitElement {
       show_value: true,
       value_mode: "auto",
       shape: "rounded",
+      design: "fill",
       ...hoistSections(config),
     };
 
@@ -159,12 +169,12 @@ export class HaProgressCard extends LitElement {
     return 1;
   }
 
-  /** Sections view: one row tall by default, never taller than three. */
+  /** Sections view: one row tall by default, never taller than four. */
   public getGridOptions(): Record<string, number> {
     return {
       rows: 1,
       min_rows: 1,
-      max_rows: 3,
+      max_rows: 4,
       columns: 12,
       min_columns: 6,
     };
@@ -530,8 +540,13 @@ export class HaProgressCard extends LitElement {
     if (!this._config || !this.hass) return nothing;
 
     const stateObj = this._stateObj;
+    const { w: width, h: height } = this._size;
     const radius =
-      this._config.shape === "theme" ? "var(--ha-card-border-radius, 12px)" : "999px";
+      this._config.shape === "theme"
+        ? "var(--ha-card-border-radius, 12px)"
+        : height > 72
+          ? "28px"
+          : "999px";
 
     if (!stateObj) {
       return html`
@@ -558,19 +573,50 @@ export class HaProgressCard extends LitElement {
       this._config.bar_color,
     );
 
+    const design = this._config.design ?? "fill";
+    const tall = design === "fill" && height >= TALL_FILL_HEIGHT;
+    const shown = available ? percentage : 0;
+
     const hostStyle = styleMap({
       "--pb-radius": radius,
-      "--pb-scale": String(this._scale),
+      "--pb-scale": String(design === "fill" && !tall ? this._scale : 1),
+      "--pb-card-h": `${height}px`,
       "--pb-bar-color": barColor,
       "--pb-ink-primary": this._ink === "dark" ? "rgba(0, 0, 0, 0.92)" : "rgba(255, 255, 255, 0.98)",
       "--pb-ink-secondary": this._ink === "dark" ? "rgba(0, 0, 0, 0.66)" : "rgba(255, 255, 255, 0.78)",
     });
-    const fillStyle = styleMap({ width: `${available ? percentage : 0}%` });
+    const fillStyle = styleMap(tall ? { height: `${shown}%` } : { width: `${shown}%` });
+
+    let body: TemplateResult;
+    if (design === "ring") {
+      body = html`<div class="layer base">
+        ${this._renderRing(stateObj, shown, name, secondaryText, valueText, showValue, width, height)}
+      </div>`;
+    } else if (design === "dots") {
+      body = html`<div class="layer base">
+        ${this._renderDots(stateObj, shown, name, secondaryText, valueText, showValue, width, height)}
+      </div>`;
+    } else {
+      body = html`
+        <div class="fill" style=${fillStyle}></div>
+        <div class="layer base">
+          ${this._renderContent(stateObj, name, secondaryText, valueText, showValue, tall)}
+        </div>
+        <div class="clip" style=${fillStyle}>
+          ${this._renderContent(stateObj, name, secondaryText, valueText, showValue, tall)}
+        </div>
+      `;
+    }
 
     return html`
       <ha-card
         style=${hostStyle}
-        class=${classMap({ unavailable: !available, interactive: this._hasAction() })}
+        class=${classMap({
+          unavailable: !available,
+          interactive: this._hasAction(),
+          tall,
+          [`design-${design}`]: true,
+        })}
         role=${this._hasAction() ? "button" : "presentation"}
         tabindex=${this._hasAction() ? "0" : "-1"}
         @pointerdown=${this._onPointerDown}
@@ -579,14 +625,122 @@ export class HaProgressCard extends LitElement {
         @pointerleave=${this._onPointerCancel}
         @keydown=${this._onKeyDown}
       >
-        <div class="fill" style=${fillStyle}></div>
-        <div class="layer base">
-          ${this._renderContent(stateObj, name, secondaryText, valueText, showValue)}
-        </div>
-        <div class="clip" style=${fillStyle}>
-          ${this._renderContent(stateObj, name, secondaryText, valueText, showValue)}
-        </div>
+        ${body}
       </ha-card>
+    `;
+  }
+
+  private _renderIcon(stateObj: HassEntity): TemplateResult {
+    const icon = this._config?.icon;
+    return icon
+      ? html`<ha-icon class="icon" .icon=${icon}></ha-icon>`
+      : html`<ha-state-icon class="icon" .hass=${this.hass} .stateObj=${stateObj}></ha-state-icon>`;
+  }
+
+  private _renderText(name: string, secondary: string): TemplateResult {
+    return html`<div class="text">
+      ${this._renderLine("name", name, this._name)}
+      ${secondary ? this._renderLine("secondary", secondary, this._secondary) : nothing}
+    </div>`;
+  }
+
+  /** A ring that fills clockwise. `pathLength` lets the dash maths stay in percent. */
+  private _ringSvg(percentage: number): TemplateResult {
+    return html`<svg class="ring-svg" viewBox="0 0 100 100" aria-hidden="true">
+      <circle class="ring-track" cx="50" cy="50" r="44" pathLength="100"></circle>
+      <circle
+        class="ring-bar"
+        cx="50"
+        cy="50"
+        r="44"
+        pathLength="100"
+        stroke-dasharray="100"
+        stroke-dashoffset=${100 - percentage}
+        opacity=${percentage > 0 ? 1 : 0}
+      ></circle>
+    </svg>`;
+  }
+
+  private _renderRing(
+    stateObj: HassEntity,
+    percentage: number,
+    name: string,
+    secondary: string,
+    valueText: string,
+    showValue: boolean,
+    width: number,
+    height: number,
+  ): TemplateResult {
+    const stacked = height >= TALL_RING_HEIGHT;
+    const compact = height < COMPACT_HEIGHT;
+    const size = stacked
+      ? clamp(height - 96, 80, Math.min(width - 32, 200))
+      : compact
+        ? Math.max(32, height - 16)
+        : Math.min(height - 28, 130);
+
+    // One row: icon in the ring, value to the right. Taller: value in the ring.
+    const centre = compact
+      ? this._renderIcon(stateObj)
+      : html`${size >= 96 || stacked ? this._renderIcon(stateObj) : nothing}
+        ${showValue
+          ? html`<div class="ring-value" style=${styleMap({ fontSize: `${size * 0.22}px` })}>
+              ${valueText}
+            </div>`
+          : nothing}`;
+
+    return html`
+      <div class=${classMap({ content: true, ring: true, stacked, fade: this._fade })}>
+        <div class="ring-box" style=${styleMap({ width: `${size}px`, height: `${size}px` })}>
+          ${this._ringSvg(percentage)}
+          <div class="ring-centre">${centre}</div>
+        </div>
+        ${this._renderText(name, secondary)}
+        ${compact && showValue ? this._renderValue(valueText) : nothing}
+      </div>
+    `;
+  }
+
+  private _renderDots(
+    stateObj: HassEntity,
+    percentage: number,
+    name: string,
+    secondary: string,
+    valueText: string,
+    showValue: boolean,
+    width: number,
+    height: number,
+  ): TemplateResult {
+    const compact = height < COMPACT_HEIGHT;
+    const cols = compact ? 10 : Math.max(4, Math.floor((width - 16) / DOT_CELL));
+    const rows = compact ? 2 : Math.max(1, Math.floor((height - BASE_ROW_HEIGHT - 8) / DOT_CELL));
+    const total = cols * rows;
+    const lit = (percentage / 100) * total;
+    const whole = Math.floor(lit);
+
+    const dots = Array.from({ length: total }, (_, index) =>
+      html`<span
+        class=${classMap({ dot: true, on: index < whole, part: index === whole && lit > whole })}
+      ></span>`,
+    );
+    const grid = html`<div
+      class=${classMap({ dots: true, inline: compact })}
+      style=${styleMap({
+        "grid-template-columns": `repeat(${cols}, 1fr)`,
+        "--pb-dot": compact ? "6px" : `${Math.round(DOT_CELL * 0.7)}px`,
+      })}
+    >
+      ${dots}
+    </div>`;
+
+    return html`
+      <div class=${classMap({ content: true, "dots-layout": !compact, fade: this._fade })}>
+        <div class="dots-head">
+          ${this._renderIcon(stateObj)} ${this._renderText(name, secondary)}
+          ${compact ? grid : nothing} ${showValue ? this._renderValue(valueText) : nothing}
+        </div>
+        ${compact ? nothing : grid}
+      </div>
     `;
   }
 
@@ -601,21 +755,28 @@ export class HaProgressCard extends LitElement {
     secondary: string,
     valueText: string,
     showValue: boolean,
+    tall = false,
   ): TemplateResult {
-    const icon = this._config?.icon;
+    if (tall) {
+      // The value becomes a giant ghost numeral that the rising fill reveals.
+      const { w, h } = this._size;
+      const ghost = clamp(
+        Math.min(h * 0.62, (w * 0.9) / Math.max(1, valueText.length * 0.55)),
+        28,
+        200,
+      );
+      return html`
+        <div class=${classMap({ content: true, tall: true, fade: this._fade })}>
+          ${showValue
+            ? html`<div class="ghost" style=${styleMap({ fontSize: `${ghost}px` })}>${valueText}</div>`
+            : nothing}
+          <div class="head">${this._renderIcon(stateObj)} ${this._renderText(name, secondary)}</div>
+        </div>
+      `;
+    }
     return html`
       <div class=${classMap({ content: true, fade: this._fade })}>
-        ${icon
-          ? html`<ha-icon class="icon" .icon=${icon}></ha-icon>`
-          : html`<ha-state-icon
-              class="icon"
-              .hass=${this.hass}
-              .stateObj=${stateObj}
-            ></ha-state-icon>`}
-        <div class="text">
-          ${this._renderLine("name", name, this._name)}
-          ${secondary ? this._renderLine("secondary", secondary, this._secondary) : nothing}
-        </div>
+        ${this._renderIcon(stateObj)} ${this._renderText(name, secondary)}
         ${showValue ? this._renderValue(valueText) : nothing}
       </div>
     `;
@@ -685,7 +846,11 @@ export class HaProgressCard extends LitElement {
     const card = this.shadowRoot?.querySelector<HTMLElement>("ha-card");
     if (!card) return;
 
-    const height = card.getBoundingClientRect().height;
+    const rect = card.getBoundingClientRect();
+    const height = rect.height;
+    if (Math.round(rect.width) !== this._size.w || Math.round(height) !== this._size.h) {
+      this._size = { w: Math.round(rect.width), h: Math.round(height) };
+    }
     if (height > 0) {
       const scale = clamp(1 + (height - BASE_ROW_HEIGHT) / 220, 1, 1.6);
       if (Math.abs(scale - this._scale) > 0.01) this._scale = scale;
@@ -965,6 +1130,189 @@ export class HaProgressCard extends LitElement {
         }
       }
 
+
+      /* Tall fill: rises from the bottom, behind a giant ghost value. */
+      ha-card.tall .fill,
+      ha-card.tall .clip {
+        top: auto;
+        bottom: 0;
+        inset-inline-start: 0;
+        width: 100%;
+        height: 0;
+        transition: height 550ms cubic-bezier(0.4, 0, 0.2, 1);
+        will-change: height;
+      }
+
+      ha-card.tall .clip .content {
+        position: absolute;
+        bottom: 0;
+        inset-inline-start: 0;
+        width: 100%;
+        height: var(--pb-card-h);
+      }
+
+      .content.tall {
+        display: block;
+        position: relative;
+        padding: 0;
+      }
+
+      .content.tall .head {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+      }
+
+      .ghost {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 800;
+        line-height: 1;
+        letter-spacing: -0.04em;
+        white-space: nowrap;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
+
+      .layer.base .ghost {
+        color: var(--primary-text-color);
+        opacity: 0.12;
+      }
+
+      .clip .ghost {
+        color: var(--pb-ink-primary);
+        opacity: 0.3;
+      }
+
+      /* Ring */
+      .ring-box {
+        position: relative;
+        flex: 0 0 auto;
+      }
+
+      .ring-svg {
+        display: block;
+        width: 100%;
+        height: 100%;
+        transform: rotate(-90deg);
+        fill: none;
+        stroke-width: 11;
+      }
+
+      .ring-track {
+        stroke: color-mix(in srgb, var(--primary-text-color) 14%, transparent);
+      }
+
+      .ring-bar {
+        stroke: var(--pb-bar-color);
+        stroke-linecap: round;
+        transition:
+          stroke-dashoffset 550ms cubic-bezier(0.4, 0, 0.2, 1),
+          stroke 350ms ease;
+      }
+
+      .ring-centre {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 2px;
+      }
+
+      .ring-centre .icon {
+        --mdc-icon-size: 22px;
+        width: 22px;
+        height: 22px;
+        color: var(--pb-bar-color);
+      }
+
+      .ring-value {
+        font-weight: 700;
+        line-height: 1;
+      }
+
+      .content.ring.stacked {
+        flex-direction: column;
+        justify-content: center;
+        gap: 12px;
+        padding: 12px 16px;
+      }
+
+      .content.ring.stacked .text {
+        flex: 0 0 auto;
+        width: 100%;
+        text-align: center;
+      }
+
+      .content.ring.stacked .ring-centre .icon {
+        --mdc-icon-size: 28px;
+        width: 28px;
+        height: 28px;
+      }
+
+      /* Dots */
+      .dots-head {
+        display: flex;
+        align-items: center;
+        gap: calc(10px * var(--pb-scale));
+        min-width: 0;
+        width: 100%;
+      }
+
+      .content.dots-layout {
+        flex-direction: column;
+        align-items: stretch;
+        justify-content: flex-start;
+        gap: 0;
+        padding: 0 8px 8px;
+      }
+
+      .content.dots-layout .dots-head {
+        flex: 0 0 ${BASE_ROW_HEIGHT}px;
+        height: ${BASE_ROW_HEIGHT}px;
+        box-sizing: border-box;
+        padding: 0 8px;
+      }
+
+      .dots {
+        flex: 1 1 auto;
+        display: grid;
+        align-content: space-evenly;
+        justify-items: center;
+        min-height: 0;
+      }
+
+      .dots.inline {
+        flex: 0 0 auto;
+        gap: 4px 3px;
+        align-content: center;
+        width: 90px;
+      }
+
+      .dot {
+        width: var(--pb-dot);
+        height: var(--pb-dot);
+        border-radius: 50%;
+        background: color-mix(in srgb, var(--primary-text-color) 14%, transparent);
+        transition: background-color 350ms ease;
+      }
+
+      .dot.on {
+        background: var(--pb-bar-color);
+      }
+
+      .dot.part {
+        background: color-mix(in srgb, var(--pb-bar-color) 45%, transparent);
+      }
+
       ha-card.unavailable .layer.base .content {
         opacity: 0.55;
       }
@@ -972,6 +1320,8 @@ export class HaProgressCard extends LitElement {
       @media (prefers-reduced-motion: reduce) {
         .fill,
         .clip,
+        .ring-bar,
+        .dot,
         .content {
           transition: none;
         }

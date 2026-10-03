@@ -73,6 +73,7 @@ export interface CalendarEvent {
 
 export type ValueMode = "auto" | "percentage" | "value";
 export type CardShape = "theme" | "rounded";
+export type ProgressDesign = "fill" | "ring" | "dots";
 
 export interface ProgressCardConfig {
   type: string;
@@ -85,6 +86,8 @@ export interface ProgressCardConfig {
   show_value?: boolean;
   value_mode?: ValueMode;
   shape?: CardShape;
+  /** How progress is drawn: a bar filling the card, a ring, or a grid of dots. */
+  design?: ProgressDesign;
   bar_color?: string;
   thresholds?: ThresholdConfig[];
   secondary_entities?: string[];

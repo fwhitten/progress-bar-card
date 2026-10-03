@@ -7,7 +7,18 @@ A progress bar card for Home Assistant. Point it at any numeric entity and it dr
 bar with the icon, name and value laid over the fill — with the content automatically flipping
 between light and dark ink as the bar passes underneath it.
 
-Built for the **sections** dashboard layout: one grid row tall by default, resizable up to three.
+Built for the **sections** dashboard layout: one grid row tall by default, resizable up to four.
+
+## Progress styles
+
+Choose how progress is drawn with `design` (or **Progress style** in the editor). Every style adapts
+to the card's height.
+
+| `design` | 1–2 rows | 3–4 rows |
+| --- | --- | --- |
+| `fill` (default) | Bar fills the card, text flips colour under it | Fill rises from the bottom behind a giant ghost value |
+| `ring` | Ring beside the name, value inside it | 4 rows: large centred ring with the name below |
+| `dots` | One row: a small dot grid inline. Two rows: header plus a dot grid | Header plus a dot grid that fills the card |
 
 ## Features
 
@@ -149,6 +160,7 @@ thresholds:
 | `value_mode` | string | `auto` | `auto`, `percentage` or `value` |
 | `value_entity` | string | — | Show this entity's state as the value instead |
 | `value_wrap` | boolean | `false` | Break the value at spaces, one centred line per word |
+| `design` | string | `fill` | `fill`, `ring` or `dots` |
 | `shape` | string | `rounded` | `rounded` (pill) or `theme` (theme corner radius) |
 | `bar_color` | string | `primary` | Bar colour when no threshold applies |
 | `thresholds` | list | — | List of `{ value, color }` stops |
